@@ -11,6 +11,7 @@ import random
 import string
 import shutil
 import time
+import base64
 
 # --- تنظیمات لاگینگ ---
 logging.basicConfig(
@@ -83,7 +84,14 @@ def load_db():
                 if "blocked_users" not in data:
                     data["blocked_users"] = []
                 if "panel_config" not in data:
-                    data["panel_config"] = {"enabled": False, "api_url": "", "admin_path": "", "username": "", "password": "", "test_config": {"volume": 50, "expiry_hours": 3, "enabled": True}}
+                    data["panel_config"] = {
+                        "enabled": False, 
+                        "api_url": "http://p.dragonteamm.shop:8081", 
+                        "admin_path": "hke43Y4nhZ23K1vc4S", 
+                        "username": "amir", 
+                        "password": "amirreza871221", 
+                        "test_config": {"volume": 50, "expiry_hours": 3, "enabled": True}
+                    }
                 if "categories" not in data:
                     data["categories"] = DEFAULT_PLANS.copy()
                 if "texts" not in data:
@@ -103,6 +111,8 @@ def load_db():
                     data["support"] = "@Support_Admin"
                 if "guide" not in data:
                     data["guide"] = "@Guide_Channel"
+                if "users" not in data:
+                    data["users"] = {}
                 return data
     except Exception as e:
         logger.error(f"❌ Error loading: {e}")
@@ -118,7 +128,14 @@ def load_db():
         "force_join": {"enabled": False, "channel_id": "", "channel_link": "", "channel_username": ""},
         "discount_codes": {},
         "blocked_users": [],
-        "panel_config": {"enabled": False, "api_url": "", "admin_path": "", "username": "amir", "password": "amirreza871221", "test_config": {"volume": 50, "expiry_hours": 3, "enabled": True}},
+        "panel_config": {
+            "enabled": False, 
+            "api_url": "http://p.dragonteamm.shop:8081", 
+            "admin_path": "hke43Y4nhZ23K1vc4S", 
+            "username": "amir", 
+            "password": "amirreza871221", 
+            "test_config": {"volume": 50, "expiry_hours": 3, "enabled": True}
+        },
         "texts": {
             "welcome": "🔰 به {brand} خوش آمدید\n\n✅ فروش ویژه فیلترشکن\n✅ پشتیبانی 24 ساعته\n✅ نصب آسان",
             "support": "🆘 پشتیبانی: {support}",
@@ -174,26 +191,55 @@ def get_user_info(uid, context):
 def generate_discount_code():
     return ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
 
+def get_panel_session(db_data):
+    """دریافت سشن برای اتصال به پنل سنا"""
+    panel = db_data.get("panel_config", {})
+    api_url = panel.get('api_url', '').rstrip('/')
+    admin_path = panel.get('admin_path', '')
+    username = panel.get('username', '')
+    password = panel.get('password', '')
+    
+    session = requests.Session()
+    
+    # روش اول: لاگین با JSON
+    try:
+        login_res = session.post(
+            f"{api_url}/{admin_path}/login",
+            json={"username": username, "password": password},
+            timeout=30
+        )
+        if login_res.status_code == 200:
+            return session, None
+    except:
+        pass
+    
+    # روش دوم: لاگین با فرم دیتا
+    try:
+        login_res = session.post(
+            f"{api_url}/{admin_path}/login",
+            data={"username": username, "password": password},
+            timeout=30
+        )
+        if login_res.status_code == 200:
+            return session, None
+    except:
+        pass
+    
+    return None, "خطا در اتصال به پنل"
+
 def create_account_on_panel(plan, account_name, db_data):
+    """ساخت اکانت در پنل سنا"""
     panel = db_data.get("panel_config", {})
     if not panel.get("enabled"):
         return None, "پنل متصل نیست"
     
     try:
+        session, error = get_panel_session(db_data)
+        if not session:
+            return None, error
+        
         api_url = panel.get('api_url', '').rstrip('/')
         admin_path = panel.get('admin_path', '')
-        username = panel.get('username', '')
-        password = panel.get('password', '')
-        
-        # ساخت سشن
-        session = requests.Session()
-        
-        # لاگین به پنل
-        login_url = f"{api_url}/{admin_path}/login"
-        login_res = session.post(login_url, json={"username": username, "password": password}, timeout=30)
-        
-        if login_res.status_code != 200:
-            return None, f"خطا در اتصال به پنل: {login_res.status_code}"
         
         # دریافت حجم
         volume = plan.get("volume", "0GB")
@@ -214,12 +260,15 @@ def create_account_on_panel(plan, account_name, db_data):
             "enable": True
         }
         
-        add_res = session.post(f"{api_url}/{admin_path}/api/user/add", json=add_payload, timeout=30)
+        add_res = session.post(
+            f"{api_url}/{admin_path}/api/user/add",
+            json=add_payload,
+            timeout=30
+        )
         
         if add_res.status_code == 200:
             result = add_res.json()
             if result.get('success'):
-                # دریافت لینک سابسکریپشن
                 sub_url = f"{api_url}/sub/{client_email}"
                 return sub_url, None
         
@@ -228,6 +277,7 @@ def create_account_on_panel(plan, account_name, db_data):
         return None, str(e)
 
 def create_test_account(db_data):
+    """ساخت اکانت تست در پنل سنا"""
     panel = db_data.get("panel_config", {})
     test_config = panel.get("test_config", {})
     
@@ -235,18 +285,12 @@ def create_test_account(db_data):
         return None, "تست غیرفعال است"
     
     try:
+        session, error = get_panel_session(db_data)
+        if not session:
+            return None, error
+        
         api_url = panel.get('api_url', '').rstrip('/')
         admin_path = panel.get('admin_path', '')
-        username = panel.get('username', '')
-        password = panel.get('password', '')
-        
-        session = requests.Session()
-        
-        login_url = f"{api_url}/{admin_path}/login"
-        login_res = session.post(login_url, json={"username": username, "password": password}, timeout=30)
-        
-        if login_res.status_code != 200:
-            return None, f"خطا در اتصال: {login_res.status_code}"
         
         volume_mb = test_config.get("volume", 50)
         volume_gb = round(volume_mb / 1024, 2)
@@ -262,7 +306,11 @@ def create_test_account(db_data):
             "enable": True
         }
         
-        add_res = session.post(f"{api_url}/{admin_path}/api/user/add", json=add_payload, timeout=30)
+        add_res = session.post(
+            f"{api_url}/{admin_path}/api/user/add",
+            json=add_payload,
+            timeout=30
+        )
         
         if add_res.status_code == 200 and add_res.json().get('success'):
             sub_url = f"{api_url}/sub/{client_email}"
@@ -272,6 +320,7 @@ def create_test_account(db_data):
     except Exception as e:
         return None, str(e)
 
+# بارگذاری دیتابیس
 db = load_db()
 user_data = {}
 
@@ -895,7 +944,6 @@ def handle_msg(update, context):
                 if text.startswith('🔄 '):
                     backup_file = text[2:]
                     if restore_backup(backup_file):
-                        global db
                         db = load_db()
                         update.message.reply_text("✅ بکاپ با موفقیت بازیابی شد", reply_markup=admin_menu())
                     else:
@@ -1101,7 +1149,6 @@ def handle_cb(update, context):
 
         elif query.data.startswith("approve_"):
             if str(uid) == str(ADMIN_ID):
-                import base64
                 encoded = query.data.replace("approve_", "")
                 try:
                     plan_data = json.loads(base64.b64decode(encoded).decode())
@@ -1161,8 +1208,6 @@ def handle_photo(update, context):
             
             cap = f"💰 فیش جدید\n━━━━━━━━━━━━━━━━━\n👤 {user_info}\n🆔 {uid}\n📦 {p['name']}\n👤 اکانت: {acc}\n💰 {price_toman:,} تومان"
             
-            import base64
-            import json
             plan_data = {'uid': uid, 'plan': p, 'account': acc}
             encoded = base64.b64encode(json.dumps(plan_data).encode()).decode()
             
