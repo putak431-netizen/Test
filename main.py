@@ -31,7 +31,7 @@ def run_web():
     app_web.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
 # --- توکن و آیدی ادمین ---
-TOKEN = '8765075222:AAFT6p_zeYmEcahPoezxtUeqMlsGz0Ra35o'
+TOKEN = '8298942850:AAFdcOhM0se4nHJScRI5cSwKCM_6k4H_UHQ'
 ADMIN_ID = 5993860770
 
 # --- تنظیمات پنل (قابل ویرایش توسط ادمین) ---
