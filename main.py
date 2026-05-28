@@ -59,7 +59,7 @@ DEFAULT_PLANS = {
     ]
 }
 
-def reset_webhook_and_clean():
+def reset_webhook():
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/deleteWebhook"
         requests.post(url, json={"drop_pending_updates": True})
@@ -70,21 +70,26 @@ def reset_webhook_and_clean():
     except:
         return False
 
+# دیتابیس سراسری
+DB = None
+
 def load_db():
+    global DB
     try:
         if os.path.exists(DB_FILE):
             with open(DB_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
+                DB = json.load(f)
                 logger.info("✅ Database loaded")
                 
-                if "force_join" not in data:
-                    data["force_join"] = {"enabled": False, "channel_id": "", "channel_link": "", "channel_username": ""}
-                if "discount_codes" not in data:
-                    data["discount_codes"] = {}
-                if "blocked_users" not in data:
-                    data["blocked_users"] = []
-                if "panel_config" not in data:
-                    data["panel_config"] = {
+                # فیلدهای پیش‌فرض
+                if "force_join" not in DB:
+                    DB["force_join"] = {"enabled": False, "channel_id": "", "channel_link": "", "channel_username": ""}
+                if "discount_codes" not in DB:
+                    DB["discount_codes"] = {}
+                if "blocked_users" not in DB:
+                    DB["blocked_users"] = []
+                if "panel_config" not in DB:
+                    DB["panel_config"] = {
                         "enabled": False, 
                         "api_url": "http://p.dragonteamm.shop:8081", 
                         "admin_path": "hke43Y4nhZ23K1vc4S", 
@@ -92,10 +97,10 @@ def load_db():
                         "password": "amirreza871221", 
                         "test_config": {"volume": 50, "expiry_hours": 3, "enabled": True}
                     }
-                if "categories" not in data:
-                    data["categories"] = DEFAULT_PLANS.copy()
-                if "texts" not in data:
-                    data["texts"] = {
+                if "categories" not in DB:
+                    DB["categories"] = DEFAULT_PLANS.copy()
+                if "texts" not in DB:
+                    DB["texts"] = {
                         "welcome": "🔰 به {brand} خوش آمدید\n\n✅ فروش ویژه فیلترشکن\n✅ پشتیبانی 24 ساعته\n✅ نصب آسان",
                         "support": "🆘 پشتیبانی: {support}",
                         "guide": "📚 آموزش: {guide}",
@@ -103,22 +108,22 @@ def load_db():
                         "force": "🔒 برای استفاده از ربات باید در کانال زیر عضو شوید:\n{link}\n\nپس از عضویت، دکمه ✅ تایید را بزنید.",
                         "invite": "🤝 لینک دعوت شما:\n{link}\n\nبه ازای هر دعوت 1 روز هدیه"
                     }
-                if "brand" not in data:
-                    data["brand"] = "تک نت وی‌پی‌ان"
-                if "card" not in data:
-                    data["card"] = {"number": "6277601368776066", "name": "محمد رضوانی"}
-                if "support" not in data:
-                    data["support"] = "@Support_Admin"
-                if "guide" not in data:
-                    data["guide"] = "@Guide_Channel"
-                if "users" not in data:
-                    data["users"] = {}
-                return data
+                if "brand" not in DB:
+                    DB["brand"] = "تک نت وی‌پی‌ان"
+                if "card" not in DB:
+                    DB["card"] = {"number": "6277601368776066", "name": "محمد رضوانی"}
+                if "support" not in DB:
+                    DB["support"] = "@Support_Admin"
+                if "guide" not in DB:
+                    DB["guide"] = "@Guide_Channel"
+                if "users" not in DB:
+                    DB["users"] = {}
+                return
     except Exception as e:
         logger.error(f"❌ Error loading: {e}")
     
     logger.info("📁 Creating default database")
-    return {
+    DB = {
         "users": {},
         "brand": "تک نت وی‌پی‌ان",
         "card": {"number": "6277601368776066", "name": "محمد رضوانی"},
@@ -146,10 +151,11 @@ def load_db():
         }
     }
 
-def save_db(data):
+def save_db():
+    global DB
     try:
         with open(DB_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
+            json.dump(DB, f, ensure_ascii=False, indent=4)
         return True
     except:
         return False
@@ -176,7 +182,6 @@ def restore_backup(backup_file):
             return True
     except:
         return False
-    return False
 
 def get_user_info(uid, context):
     try:
@@ -191,34 +196,51 @@ def get_user_info(uid, context):
 def generate_discount_code():
     return ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
 
-def get_panel_session(db_data):
-    """دریافت سشن برای اتصال به پنل سنا"""
-    panel = db_data.get("panel_config", {})
+def login_to_panel():
+    """ورود به پنل و دریافت سشن"""
+    global DB
+    panel = DB.get("panel_config", {})
     api_url = panel.get('api_url', '').rstrip('/')
     admin_path = panel.get('admin_path', '')
     username = panel.get('username', '')
     password = panel.get('password', '')
     
+    if not api_url or not admin_path or not username or not password:
+        return None, "تنظیمات پنل کامل نیست"
+    
     session = requests.Session()
     
-    # روش اول: لاگین با JSON
+    # تلاش برای لاگین
     try:
+        # روش اول: لاگین با JSON
         login_res = session.post(
             f"{api_url}/{admin_path}/login",
             json={"username": username, "password": password},
-            timeout=30
+            timeout=10
         )
         if login_res.status_code == 200:
             return session, None
     except:
         pass
     
-    # روش دوم: لاگین با فرم دیتا
     try:
+        # روش دوم: لاگین با فرم دیتا
         login_res = session.post(
             f"{api_url}/{admin_path}/login",
             data={"username": username, "password": password},
-            timeout=30
+            timeout=10
+        )
+        if login_res.status_code == 200:
+            return session, None
+    except:
+        pass
+    
+    try:
+        # روش سوم: لاگین با هدر
+        login_res = session.post(
+            f"{api_url}/login",
+            json={"username": username, "password": password},
+            timeout=10
         )
         if login_res.status_code == 200:
             return session, None
@@ -227,21 +249,22 @@ def get_panel_session(db_data):
     
     return None, "خطا در اتصال به پنل"
 
-def create_account_on_panel(plan, account_name, db_data):
-    """ساخت اکانت در پنل سنا"""
-    panel = db_data.get("panel_config", {})
+def create_account_on_panel(plan, account_name):
+    """ساخت اکانت در پنل"""
+    global DB
+    panel = DB.get("panel_config", {})
     if not panel.get("enabled"):
         return None, "پنل متصل نیست"
     
+    session, error = login_to_panel()
+    if not session:
+        return None, error
+    
+    api_url = panel.get('api_url', '').rstrip('/')
+    admin_path = panel.get('admin_path', '')
+    
     try:
-        session, error = get_panel_session(db_data)
-        if not session:
-            return None, error
-        
-        api_url = panel.get('api_url', '').rstrip('/')
-        admin_path = panel.get('admin_path', '')
-        
-        # دریافت حجم
+        # دریافت حجم به گیگابایت
         volume = plan.get("volume", "0GB")
         volume_gb = 0
         if "GB" in volume:
@@ -250,9 +273,10 @@ def create_account_on_panel(plan, account_name, db_data):
         expiry_days = plan.get("days", 30)
         expiry_time = int((datetime.now() + timedelta(days=expiry_days)).timestamp())
         
-        # ایجاد کاربر
+        # ایمیل کاربر
         client_email = f"{account_name}_{int(time.time())}".replace(' ', '_')
         
+        # ساخت کاربر جدید
         add_payload = {
             "email": client_email,
             "total_gb": volume_gb,
@@ -269,6 +293,7 @@ def create_account_on_panel(plan, account_name, db_data):
         if add_res.status_code == 200:
             result = add_res.json()
             if result.get('success'):
+                # لینک سابسکریپشن
                 sub_url = f"{api_url}/sub/{client_email}"
                 return sub_url, None
         
@@ -276,22 +301,26 @@ def create_account_on_panel(plan, account_name, db_data):
     except Exception as e:
         return None, str(e)
 
-def create_test_account(db_data):
-    """ساخت اکانت تست در پنل سنا"""
-    panel = db_data.get("panel_config", {})
+def create_test_account():
+    """ساخت اکانت تست"""
+    global DB
+    panel = DB.get("panel_config", {})
     test_config = panel.get("test_config", {})
     
-    if not panel.get("enabled") or not test_config.get("enabled"):
+    if not panel.get("enabled"):
+        return None, "پنل متصل نیست"
+    
+    if not test_config.get("enabled"):
         return None, "تست غیرفعال است"
     
+    session, error = login_to_panel()
+    if not session:
+        return None, error
+    
+    api_url = panel.get('api_url', '').rstrip('/')
+    admin_path = panel.get('admin_path', '')
+    
     try:
-        session, error = get_panel_session(db_data)
-        if not session:
-            return None, error
-        
-        api_url = panel.get('api_url', '').rstrip('/')
-        admin_path = panel.get('admin_path', '')
-        
         volume_mb = test_config.get("volume", 50)
         volume_gb = round(volume_mb / 1024, 2)
         expiry_hours = test_config.get("expiry_hours", 3)
@@ -320,8 +349,7 @@ def create_test_account(db_data):
     except Exception as e:
         return None, str(e)
 
-# بارگذاری دیتابیس
-db = load_db()
+# متغیرهای سراسری
 user_data = {}
 
 def main_menu(uid):
@@ -362,9 +390,10 @@ def discount_codes_menu():
     return ReplyKeyboardMarkup(kb, resize_keyboard=True)
 
 def check_join(user_id, context):
-    if not db["force_join"]["enabled"]:
+    global DB
+    if not DB["force_join"]["enabled"]:
         return True
-    channel_username = db["force_join"].get("channel_username", "")
+    channel_username = DB["force_join"].get("channel_username", "")
     if not channel_username:
         return True
     try:
@@ -374,48 +403,49 @@ def check_join(user_id, context):
         return False
 
 def start(update, context):
+    global DB, user_data
     uid = str(update.effective_user.id)
     
-    if uid in db.get("blocked_users", []):
+    if uid in DB.get("blocked_users", []):
         update.message.reply_text("🚫 شما توسط ادمین بلاک شده‌اید")
         return
     
-    if uid not in db["users"]:
-        db["users"][uid] = {"purchases": [], "tests": [], "test_count": 0, "date": datetime.now().strftime("%Y-%m-%d")}
-        save_db(db)
+    if uid not in DB["users"]:
+        DB["users"][uid] = {"purchases": [], "tests": [], "test_count": 0, "date": datetime.now().strftime("%Y-%m-%d")}
+        save_db()
     
     user_data[uid] = {}
     
-    if db["force_join"]["enabled"] and db["force_join"]["channel_link"]:
+    if DB["force_join"]["enabled"] and DB["force_join"]["channel_link"]:
         if not check_join(uid, context):
             btn = InlineKeyboardMarkup([[
-                InlineKeyboardButton("📢 عضویت در کانال", url=db["force_join"]["channel_link"]),
+                InlineKeyboardButton("📢 عضویت در کانال", url=DB["force_join"]["channel_link"]),
                 InlineKeyboardButton("✅ تایید عضویت", callback_data="join_check")
             ]])
-            update.message.reply_text(db["texts"]["force"].format(link=db["force_join"]["channel_link"]), reply_markup=btn)
+            update.message.reply_text(DB["texts"]["force"].format(link=DB["force_join"]["channel_link"]), reply_markup=btn)
             return
     
-    update.message.reply_text(db["texts"]["welcome"].format(brand=db["brand"]), reply_markup=main_menu(uid))
+    update.message.reply_text(DB["texts"]["welcome"].format(brand=DB["brand"]), reply_markup=main_menu(uid))
 
 def handle_msg(update, context):
-    global db
+    global DB, user_data
     try:
         text = update.message.text
         uid = str(update.effective_user.id)
         
-        if uid in db.get("blocked_users", []):
+        if uid in DB.get("blocked_users", []):
             update.message.reply_text("🚫 شما توسط ادمین بلاک شده‌اید")
             return
         
         step = user_data.get(uid, {}).get('step')
 
-        if db["force_join"]["enabled"] and db["force_join"]["channel_link"]:
+        if DB["force_join"]["enabled"] and DB["force_join"]["channel_link"]:
             if not check_join(uid, context) and text != '/start':
                 btn = InlineKeyboardMarkup([[
-                    InlineKeyboardButton("📢 عضویت در کانال", url=db["force_join"]["channel_link"]),
+                    InlineKeyboardButton("📢 عضویت در کانال", url=DB["force_join"]["channel_link"]),
                     InlineKeyboardButton("✅ تایید عضویت", callback_data="join_check")
                 ]])
-                update.message.reply_text(db["texts"]["force"].format(link=db["force_join"]["channel_link"]), reply_markup=btn)
+                update.message.reply_text(DB["texts"]["force"].format(link=DB["force_join"]["channel_link"]), reply_markup=btn)
                 return
 
         if text == '🔙 برگشت':
@@ -425,31 +455,31 @@ def handle_msg(update, context):
 
         # تست رایگان
         if text == '🎁 تست':
-            panel_config = db.get("panel_config", {})
+            panel_config = DB.get("panel_config", {})
             if not panel_config.get("enabled"):
-                update.message.reply_text("❌ سرویس تست غیرفعال است")
+                update.message.reply_text("❌ سرویس تست غیرفعال است\nلطفا ابتدا پنل را در بخش مدیریت تنظیم و فعال کنید")
                 return
-            if db["users"][uid]["test_count"] >= 1:
+            if DB["users"][uid]["test_count"] >= 1:
                 update.message.reply_text("❌ شما قبلاً تست گرفته‌اید")
                 return
             
             update.message.reply_text("🔄 در حال ساخت اکانت تست...")
-            config, error = create_test_account(db)
+            config, error = create_test_account()
             
             if config:
-                db["users"][uid]["test_count"] += 1
-                db["users"][uid]["tests"].append(datetime.now().strftime("%Y-%m-%d"))
-                save_db(db)
-                msg = f"🎁 اکانت تست شما آماده است\n⏱ مدت: {panel_config.get('test_config', {}).get('expiry_hours', 3)} ساعت\n📦 حجم: {panel_config.get('test_config', {}).get('volume', 50)} مگابایت\n\n🔗 لینک اتصال:\n`{config}`\n\n📚 {db['guide']}"
+                DB["users"][uid]["test_count"] += 1
+                DB["users"][uid]["tests"].append(datetime.now().strftime("%Y-%m-%d"))
+                save_db()
+                msg = f"🎁 اکانت تست شما آماده است\n━━━━━━━━━━━━━━━━━\n⏱ مدت: {panel_config.get('test_config', {}).get('expiry_hours', 3)} ساعت\n📦 حجم: {panel_config.get('test_config', {}).get('volume', 50)} مگابایت\n━━━━━━━━━━━━━━━━━\n🔗 لینک اتصال:\n`{config}`\n\n📚 {DB['guide']}"
                 update.message.reply_text(msg, parse_mode='Markdown')
             else:
-                update.message.reply_text(f"❌ خطا: {error}")
+                update.message.reply_text(f"❌ خطا در ساخت اکانت تست:\n{error}\n\nلطفاً تنظیمات پنل را بررسی کنید")
             return
 
         # سرویس‌ها
         if text == '📂 سرویس‌ها':
-            pur = db["users"][uid].get("purchases", [])
-            tests = db["users"][uid].get("tests", [])
+            pur = DB["users"][uid].get("purchases", [])
+            tests = DB["users"][uid].get("tests", [])
             msg = "📂 سرویس‌های شما:\n━━━━━━━━━━\n"
             if pur:
                 msg += "✅ خریدها:\n"
@@ -466,7 +496,7 @@ def handle_msg(update, context):
 
         # تمدید
         if text == '⏳ تمدید':
-            pur = db["users"][uid].get("purchases", [])
+            pur = DB["users"][uid].get("purchases", [])
             if not pur:
                 update.message.reply_text("❌ سرویسی برای تمدید ندارید")
                 return
@@ -476,31 +506,31 @@ def handle_msg(update, context):
 
         # پشتیبانی
         if text == '👤 پشتیبانی':
-            update.message.reply_text(db["texts"]["support"].format(support=db["support"]))
+            update.message.reply_text(DB["texts"]["support"].format(support=DB["support"]))
             return
 
         # آموزش
         if text == '📚 آموزش':
-            update.message.reply_text(db["texts"]["guide"].format(guide=db["guide"]))
+            update.message.reply_text(DB["texts"]["guide"].format(guide=DB["guide"]))
             return
 
         # دعوت
         if text == '🤝 دعوت دوستان':
             bot = context.bot.get_me().username
             link = f"https://t.me/{bot}?start={uid}"
-            update.message.reply_text(db["texts"]["invite"].format(link=link))
+            update.message.reply_text(DB["texts"]["invite"].format(link=link))
             return
 
         # خرید
         if text == '💰 خرید':
-            cats = list(db["categories"].keys())
+            cats = list(DB["categories"].keys())
             kb = [[c] for c in cats] + [['🔙 برگشت']]
             update.message.reply_text("دسته را انتخاب کنید:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
             return
 
         # نمایش پلن‌ها
-        if text in db["categories"] and not step:
-            plans = db["categories"][text]
+        if text in DB["categories"] and not step:
+            plans = DB["categories"][text]
             keyboard = []
             for p in plans:
                 price_toman = p['price'] * 1000
@@ -523,19 +553,19 @@ def handle_msg(update, context):
                     ['👤 تنظیم یوزرنیم', '🔑 تنظیم رمز'],
                     ['🔙 برگشت']
                 ]
-                status = "✅ فعال" if db["panel_config"]["enabled"] else "❌ غیرفعال"
-                update.message.reply_text(f"🔌 وضعیت پنل: {status}\nآدرس: {db['panel_config'].get('api_url', 'تنظیم نشده')}\nمسیر ادمین: {db['panel_config'].get('admin_path', 'تنظیم نشده')}", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
+                status = "✅ فعال" if DB["panel_config"]["enabled"] else "❌ غیرفعال"
+                update.message.reply_text(f"🔌 وضعیت پنل: {status}\nآدرس: {DB['panel_config'].get('api_url', 'تنظیم نشده')}\nمسیر ادمین: {DB['panel_config'].get('admin_path', 'تنظیم نشده')}", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
                 return
 
             if text == '✅ فعال کردن پنل':
-                db["panel_config"]["enabled"] = True
-                save_db(db)
+                DB["panel_config"]["enabled"] = True
+                save_db()
                 update.message.reply_text("✅ پنل فعال شد", reply_markup=admin_menu())
                 return
 
             if text == '❌ غیرفعال کردن پنل':
-                db["panel_config"]["enabled"] = False
-                save_db(db)
+                DB["panel_config"]["enabled"] = False
+                save_db()
                 update.message.reply_text("❌ پنل غیرفعال شد", reply_markup=admin_menu())
                 return
 
@@ -561,7 +591,7 @@ def handle_msg(update, context):
 
             # تنظیمات تست
             if text == '🎁 تنظیمات تست':
-                test_config = db["panel_config"].get("test_config", {})
+                test_config = DB["panel_config"].get("test_config", {})
                 keyboard = [
                     ['📊 حجم تست (MB)', '⏱ مدت تست (ساعت)'],
                     ['✅ فعال کردن تست', '❌ غیرفعال کردن تست'],
@@ -582,14 +612,14 @@ def handle_msg(update, context):
                 return
 
             if text == '✅ فعال کردن تست':
-                db["panel_config"]["test_config"]["enabled"] = True
-                save_db(db)
+                DB["panel_config"]["test_config"]["enabled"] = True
+                save_db()
                 update.message.reply_text("✅ تست فعال شد", reply_markup=admin_menu())
                 return
 
             if text == '❌ غیرفعال کردن تست':
-                db["panel_config"]["test_config"]["enabled"] = False
-                save_db(db)
+                DB["panel_config"]["test_config"]["enabled"] = False
+                save_db()
                 update.message.reply_text("❌ تست غیرفعال شد", reply_markup=admin_menu())
                 return
 
@@ -604,7 +634,7 @@ def handle_msg(update, context):
                 return
 
             if text == '📋 لیست کدها':
-                codes = db.get("discount_codes", {})
+                codes = DB.get("discount_codes", {})
                 if not codes:
                     update.message.reply_text("❌ کد تخفیفی وجود ندارد")
                 else:
@@ -627,7 +657,7 @@ def handle_msg(update, context):
                 return
 
             if text == '➖ حذف دسته':
-                cats = list(db["categories"].keys())
+                cats = list(DB["categories"].keys())
                 if not cats:
                     update.message.reply_text("❌ دسته‌ای وجود ندارد")
                 else:
@@ -661,7 +691,7 @@ def handle_msg(update, context):
             # ویرایش کارت
             if text == '💳 ویرایش کارت':
                 keyboard = [['شماره کارت', 'نام صاحب کارت'], ['🔙 برگشت']]
-                update.message.reply_text(f"شماره: {db['card']['number']}\nنام: {db['card']['name']}", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
+                update.message.reply_text(f"شماره: {DB['card']['number']}\nنام: {DB['card']['name']}", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
                 return
 
             if text == 'شماره کارت':
@@ -697,27 +727,27 @@ def handle_msg(update, context):
             text_map = {'خوش‌آمدگویی': 'welcome', 'پشتیبانی': 'support', 'آموزش': 'guide', 'تست رایگان': 'test', 'عضویت اجباری': 'force', 'دعوت دوستان': 'invite'}
             if text in text_map:
                 user_data[uid] = {'step': f'edit_{text_map[text]}'}
-                update.message.reply_text(f"متن فعلی:\n{db['texts'][text_map[text]]}\n\nمتن جدید را بفرستید:", reply_markup=back_btn())
+                update.message.reply_text(f"متن فعلی:\n{DB['texts'][text_map[text]]}\n\nمتن جدید را بفرستید:", reply_markup=back_btn())
                 return
 
             if text == '🔒 عضویت اجباری':
                 keyboard = [['✅ فعال', '❌ غیرفعال'], ['🔗 تنظیم لینک کانال'], ['🔙 برگشت']]
-                status = "✅ فعال" if db["force_join"]["enabled"] else "❌ غیرفعال"
-                update.message.reply_text(f"🔒 وضعیت: {status}\nکانال: {db['force_join'].get('channel_link', 'تنظیم نشده')}", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
+                status = "✅ فعال" if DB["force_join"]["enabled"] else "❌ غیرفعال"
+                update.message.reply_text(f"🔒 وضعیت: {status}\nکانال: {DB['force_join'].get('channel_link', 'تنظیم نشده')}", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
                 return
 
             if text == '✅ فعال':
-                if db["force_join"]["channel_link"]:
-                    db["force_join"]["enabled"] = True
-                    save_db(db)
+                if DB["force_join"]["channel_link"]:
+                    DB["force_join"]["enabled"] = True
+                    save_db()
                     update.message.reply_text("✅ عضویت اجباری فعال شد", reply_markup=admin_menu())
                 else:
                     update.message.reply_text("❌ ابتدا لینک کانال را تنظیم کنید")
                 return
 
             if text == '❌ غیرفعال':
-                db["force_join"]["enabled"] = False
-                save_db(db)
+                DB["force_join"]["enabled"] = False
+                save_db()
                 update.message.reply_text("✅ عضویت اجباری غیرفعال شد", reply_markup=admin_menu())
                 return
 
@@ -727,9 +757,9 @@ def handle_msg(update, context):
                 return
 
             if text == '📊 آمار':
-                total = len(db["users"])
-                pur = sum(len(u.get("purchases", [])) for u in db["users"].values())
-                tests = sum(len(u.get("tests", [])) for u in db["users"].values())
+                total = len(DB["users"])
+                pur = sum(len(u.get("purchases", [])) for u in DB["users"].values())
+                tests = sum(len(u.get("tests", [])) for u in DB["users"].values())
                 update.message.reply_text(f"📊 آمار ربات\n━━━━━━━━━━\n👥 کل کاربران: {total}\n💰 خریدها: {pur}\n🎁 تست‌ها: {tests}")
                 return
 
@@ -739,14 +769,14 @@ def handle_msg(update, context):
                 return
 
             if text == '➕ پلن جدید':
-                cats = list(db["categories"].keys())
+                cats = list(DB["categories"].keys())
                 user_data[uid] = {'step': 'new_cat'}
                 update.message.reply_text("دسته را انتخاب کنید:", reply_markup=ReplyKeyboardMarkup([[c] for c in cats] + [['🔙 برگشت']], resize_keyboard=True))
                 return
 
             if text == '➖ حذف پلن':
                 keyboard = []
-                for cat, plans in db["categories"].items():
+                for cat, plans in DB["categories"].items():
                     for p in plans:
                         keyboard.append([InlineKeyboardButton(f"❌ {cat} - {p['name']}", callback_data=f"del_{p['id']}")])
                 if keyboard:
@@ -758,8 +788,8 @@ def handle_msg(update, context):
             # مراحل مرحله‌ای ادمین
             if step == 'card_num':
                 if text.isdigit() and len(text) == 16:
-                    db["card"]["number"] = text
-                    save_db(db)
+                    DB["card"]["number"] = text
+                    save_db()
                     update.message.reply_text("✅ شماره کارت ذخیره شد", reply_markup=admin_menu())
                 else:
                     update.message.reply_text("❌ شماره کارت نامعتبر")
@@ -767,55 +797,55 @@ def handle_msg(update, context):
                 return
 
             if step == 'card_name':
-                db["card"]["name"] = text
-                save_db(db)
+                DB["card"]["name"] = text
+                save_db()
                 update.message.reply_text("✅ نام صاحب کارت ذخیره شد", reply_markup=admin_menu())
                 user_data[uid] = {}
                 return
 
             if step == 'support':
-                db["support"] = text
-                save_db(db)
+                DB["support"] = text
+                save_db()
                 update.message.reply_text("✅ پشتیبان ذخیره شد", reply_markup=admin_menu())
                 user_data[uid] = {}
                 return
 
             if step == 'guide':
-                db["guide"] = text
-                save_db(db)
+                DB["guide"] = text
+                save_db()
                 update.message.reply_text("✅ کانال آموزش ذخیره شد", reply_markup=admin_menu())
                 user_data[uid] = {}
                 return
 
             if step == 'brand':
-                db["brand"] = text
-                save_db(db)
+                DB["brand"] = text
+                save_db()
                 update.message.reply_text("✅ برند ذخیره شد", reply_markup=admin_menu())
                 user_data[uid] = {}
                 return
 
             if step and step.startswith('edit_'):
                 key = step.replace('edit_', '')
-                db["texts"][key] = text
-                save_db(db)
+                DB["texts"][key] = text
+                save_db()
                 update.message.reply_text("✅ متن ذخیره شد", reply_markup=admin_menu())
                 user_data[uid] = {}
                 return
 
             if step == 'set_link':
-                db["force_join"]["channel_link"] = text
+                DB["force_join"]["channel_link"] = text
                 if 't.me/' in text:
                     username = text.split('t.me/')[-1].split('/')[0].replace('@', '')
-                    db["force_join"]["channel_username"] = f"@{username}"
-                save_db(db)
+                    DB["force_join"]["channel_username"] = f"@{username}"
+                save_db()
                 update.message.reply_text("✅ لینک ذخیره شد", reply_markup=admin_menu())
                 user_data[uid] = {}
                 return
 
             if step == 'broadcast':
                 suc, fail = 0, 0
-                for uid2 in db["users"]:
-                    if uid2 not in db.get("blocked_users", []):
+                for uid2 in DB["users"]:
+                    if uid2 not in DB.get("blocked_users", []):
                         try:
                             context.bot.send_message(int(uid2), text)
                             suc += 1
@@ -826,37 +856,37 @@ def handle_msg(update, context):
                 return
 
             if step == 'set_api_url':
-                db["panel_config"]["api_url"] = text.rstrip('/')
-                save_db(db)
+                DB["panel_config"]["api_url"] = text.rstrip('/')
+                save_db()
                 update.message.reply_text("✅ آدرس پنل ذخیره شد", reply_markup=admin_menu())
                 user_data[uid] = {}
                 return
 
             if step == 'set_admin_path':
-                db["panel_config"]["admin_path"] = text
-                save_db(db)
+                DB["panel_config"]["admin_path"] = text
+                save_db()
                 update.message.reply_text("✅ مسیر ادمین ذخیره شد", reply_markup=admin_menu())
                 user_data[uid] = {}
                 return
 
             if step == 'set_username':
-                db["panel_config"]["username"] = text
-                save_db(db)
+                DB["panel_config"]["username"] = text
+                save_db()
                 update.message.reply_text("✅ یوزرنیم ذخیره شد", reply_markup=admin_menu())
                 user_data[uid] = {}
                 return
 
             if step == 'set_password':
-                db["panel_config"]["password"] = text
-                save_db(db)
+                DB["panel_config"]["password"] = text
+                save_db()
                 update.message.reply_text("✅ رمز عبور ذخیره شد", reply_markup=admin_menu())
                 user_data[uid] = {}
                 return
 
             if step == 'set_test_volume':
                 try:
-                    db["panel_config"]["test_config"]["volume"] = int(text)
-                    save_db(db)
+                    DB["panel_config"]["test_config"]["volume"] = int(text)
+                    save_db()
                     update.message.reply_text(f"✅ حجم تست به {text} مگابایت تغییر کرد", reply_markup=admin_menu())
                 except:
                     update.message.reply_text("❌ عدد معتبر وارد کنید")
@@ -865,8 +895,8 @@ def handle_msg(update, context):
 
             if step == 'set_test_hours':
                 try:
-                    db["panel_config"]["test_config"]["expiry_hours"] = int(text)
-                    save_db(db)
+                    DB["panel_config"]["test_config"]["expiry_hours"] = int(text)
+                    save_db()
                     update.message.reply_text(f"✅ مدت تست به {text} ساعت تغییر کرد", reply_markup=admin_menu())
                 except:
                     update.message.reply_text("❌ عدد معتبر وارد کنید")
@@ -899,13 +929,13 @@ def handle_msg(update, context):
                 try:
                     days = int(text)
                     code = generate_discount_code()
-                    db["discount_codes"][code] = {
+                    DB["discount_codes"][code] = {
                         "discount_percent": user_data[uid]['percent'],
                         "max_uses": user_data[uid]['max_uses'],
                         "uses": 0,
                         "expires": (datetime.now() + timedelta(days=days)).timestamp()
                     }
-                    save_db(db)
+                    save_db()
                     update.message.reply_text(f"✅ کد تخفیف ساخته شد:\n🎫 کد: `{code}`\n📊 درصد: {user_data[uid]['percent']}%\n📋 حداکثر استفاده: {user_data[uid]['max_uses']}\n⏱ اعتبار: {days} روز", parse_mode='Markdown')
                     user_data[uid] = {}
                 except:
@@ -913,9 +943,9 @@ def handle_msg(update, context):
                 return
 
             if step == 'del_discount_code':
-                if text in db.get("discount_codes", {}):
-                    del db["discount_codes"][text]
-                    save_db(db)
+                if text in DB.get("discount_codes", {}):
+                    del DB["discount_codes"][text]
+                    save_db()
                     update.message.reply_text("✅ کد تخفیف حذف شد", reply_markup=admin_menu())
                 else:
                     update.message.reply_text("❌ کد یافت نشد")
@@ -927,13 +957,13 @@ def handle_msg(update, context):
                     target_id = str(int(text))
                     if target_id == str(ADMIN_ID):
                         update.message.reply_text("❌ نمی‌توانید ادمین را بلاک کنید")
-                    elif target_id in db.get("blocked_users", []):
-                        db["blocked_users"].remove(target_id)
-                        save_db(db)
+                    elif target_id in DB.get("blocked_users", []):
+                        DB["blocked_users"].remove(target_id)
+                        save_db()
                         update.message.reply_text(f"✅ کاربر {target_id} آنبلاک شد")
                     else:
-                        db["blocked_users"].append(target_id)
-                        save_db(db)
+                        DB["blocked_users"].append(target_id)
+                        save_db()
                         update.message.reply_text(f"✅ کاربر {target_id} بلاک شد")
                 except:
                     update.message.reply_text("❌ آیدی عددی معتبر وارد کنید")
@@ -944,7 +974,7 @@ def handle_msg(update, context):
                 if text.startswith('🔄 '):
                     backup_file = text[2:]
                     if restore_backup(backup_file):
-                        db = load_db()
+                        load_db()
                         update.message.reply_text("✅ بکاپ با موفقیت بازیابی شد", reply_markup=admin_menu())
                     else:
                         update.message.reply_text("❌ خطا در بازیابی بکاپ")
@@ -952,9 +982,9 @@ def handle_msg(update, context):
                 return
 
             if step == 'new_category':
-                if text not in db["categories"]:
-                    db["categories"][text] = []
-                    save_db(db)
+                if text not in DB["categories"]:
+                    DB["categories"][text] = []
+                    save_db()
                     update.message.reply_text(f"✅ دسته {text} اضافه شد", reply_markup=admin_menu())
                 else:
                     update.message.reply_text("❌ این دسته قبلاً وجود دارد")
@@ -963,15 +993,15 @@ def handle_msg(update, context):
 
             if step == 'del_category' and text.startswith('❌ '):
                 cat_name = text[2:]
-                if cat_name in db["categories"]:
-                    del db["categories"][cat_name]
-                    save_db(db)
+                if cat_name in DB["categories"]:
+                    del DB["categories"][cat_name]
+                    save_db()
                     update.message.reply_text(f"✅ دسته {cat_name} حذف شد", reply_markup=admin_menu())
                 user_data[uid] = {}
                 return
 
             # مراحل پلن جدید
-            if step == 'new_cat' and text in db["categories"]:
+            if step == 'new_cat' and text in DB["categories"]:
                 user_data[uid]['cat'] = text
                 user_data[uid]['step'] = 'new_name'
                 update.message.reply_text("نام پلن:", reply_markup=back_btn())
@@ -1011,13 +1041,13 @@ def handle_msg(update, context):
                 try:
                     price = int(text)
                     max_id = 0
-                    for p in db["categories"].values():
+                    for p in DB["categories"].values():
                         for plan in p:
                             if plan["id"] > max_id:
                                 max_id = plan["id"]
                     new_plan = {"id": max_id + 1, "name": user_data[uid]['name'], "price": price, "volume": user_data[uid]['vol'], "days": user_data[uid]['days'], "users": user_data[uid]['users']}
-                    db["categories"][user_data[uid]['cat']].append(new_plan)
-                    save_db(db)
+                    DB["categories"][user_data[uid]['cat']].append(new_plan)
+                    save_db()
                     update.message.reply_text("✅ پلن اضافه شد", reply_markup=admin_menu())
                     user_data[uid] = {}
                 except:
@@ -1029,14 +1059,14 @@ def handle_msg(update, context):
                 name = user_data[uid]['name']
                 plan = user_data[uid].get('plan')
                 if plan:
-                    config, error = create_account_on_panel(plan, name, db)
+                    config, error = create_account_on_panel(plan, name)
                     if config:
                         service_record = f"✅ {plan['name']} | {plan['volume']} | {datetime.now().strftime('%Y-%m-%d')}"
-                        if str(target) not in db["users"]:
-                            db["users"][str(target)] = {"purchases": [], "tests": [], "test_count": 0}
-                        db["users"][str(target)]["purchases"].append(service_record)
-                        save_db(db)
-                        msg = f"🎉 سرویس شما آماده است\n👤 {name}\n📦 {plan['name']}\n━━━━━━━━━━━━━━━━━\n🔗 لینک اتصال:\n`{config}`\n\n📚 {db['guide']}"
+                        if str(target) not in DB["users"]:
+                            DB["users"][str(target)] = {"purchases": [], "tests": [], "test_count": 0}
+                        DB["users"][str(target)]["purchases"].append(service_record)
+                        save_db()
+                        msg = f"🎉 سرویس شما آماده است\n━━━━━━━━━━━━━━━━━\n👤 {name}\n📦 {plan['name']}\n━━━━━━━━━━━━━━━━━\n🔗 لینک اتصال:\n`{config}`\n\n📚 {DB['guide']}"
                         try:
                             context.bot.send_message(int(target), msg, parse_mode='Markdown')
                             update.message.reply_text("✅ کانفیگ ارسال شد")
@@ -1059,21 +1089,25 @@ def handle_msg(update, context):
             p = user_data[uid]['plan']
             account_name = user_data[uid]['account']
             price_toman = p['price'] * 1000
+            discount_text = ""
             
-            if text.upper() != 'ندارم' and text.upper() in db.get("discount_codes", {}):
-                code_data = db["discount_codes"][text.upper()]
-                if code_data["expires"] > datetime.now().timestamp() and code_data["uses"] < code_data["max_uses"]:
-                    discount = code_data["discount_percent"]
-                    price_toman = price_toman * (100 - discount) // 100
-                    code_data["uses"] += 1
-                    save_db(db)
-                    discount_text = f"\n🎫 تخفیف: {discount}%"
+            if text.upper() != 'ندارم':
+                code = text.upper()
+                if code in DB.get("discount_codes", {}):
+                    code_data = DB["discount_codes"][code]
+                    if code_data["expires"] > datetime.now().timestamp() and code_data["uses"] < code_data["max_uses"]:
+                        discount = code_data["discount_percent"]
+                        price_toman = price_toman * (100 - discount) // 100
+                        code_data["uses"] += 1
+                        save_db()
+                        discount_text = f"\n🎫 تخفیف: {discount}%"
+                        user_data[uid]['discount_code'] = code
+                    else:
+                        discount_text = "\n❌ کد تخفیف نامعتبر یا منقضی"
                 else:
-                    discount_text = "\n❌ کد تخفیف نامعتبر یا منقضی"
-            else:
-                discount_text = ""
+                    discount_text = "\n❌ کد تخفیف نامعتبر"
             
-            msg = f"💳 اطلاعات پرداخت\n━━━━━━━━━━━━━━\n👤 نام اکانت: {account_name}\n📦 پلن: {p['name']}\n💰 مبلغ: {price_toman:,} تومان{discount_text}\n━━━━━━━━━━━━━━\n💳 شماره کارت:\n{db['card']['number']}\n👤 {db['card']['name']}\n━━━━━━━━━━━━━━\nپس از واریز، عکس فیش را بفرستید"
+            msg = f"💳 اطلاعات پرداخت\n━━━━━━━━━━━━━━\n👤 نام اکانت: {account_name}\n📦 پلن: {p['name']}\n💰 مبلغ: {price_toman:,} تومان{discount_text}\n━━━━━━━━━━━━━━\n💳 شماره کارت:\n{DB['card']['number']}\n👤 {DB['card']['name']}\n━━━━━━━━━━━━━━\nپس از واریز، عکس فیش را بفرستید"
             
             btn = InlineKeyboardMarkup([[InlineKeyboardButton("📤 ارسال فیش", callback_data="receipt")]])
             update.message.reply_text(msg, reply_markup=btn)
@@ -1083,12 +1117,12 @@ def handle_msg(update, context):
         update.message.reply_text("❌ خطا، دوباره تلاش کنید")
 
 def handle_cb(update, context):
-    global db
+    global DB, user_data
     try:
         query = update.callback_query
         uid = str(query.from_user.id)
         
-        if uid in db.get("blocked_users", []):
+        if uid in DB.get("blocked_users", []):
             query.answer()
             query.message.reply_text("🚫 شما توسط ادمین بلاک شده‌اید")
             return
@@ -1098,14 +1132,14 @@ def handle_cb(update, context):
         if query.data == "join_check":
             if check_join(uid, context):
                 query.message.delete()
-                context.bot.send_message(uid, db["texts"]["welcome"].format(brand=db["brand"]), reply_markup=main_menu(uid))
+                context.bot.send_message(uid, DB["texts"]["welcome"].format(brand=DB["brand"]), reply_markup=main_menu(uid))
             else:
                 query.message.reply_text("❌ شما هنوز عضو کانال نشده‌اید!")
             return
 
         if query.data.startswith("buy_"):
             pid = int(query.data.split("_")[1])
-            for cat in db["categories"].values():
+            for cat in DB["categories"].values():
                 for p in cat:
                     if p["id"] == pid:
                         user_data[uid] = {'step': 'wait_name', 'plan': p}
@@ -1122,10 +1156,10 @@ def handle_cb(update, context):
 
         elif query.data.startswith("renew_"):
             index = int(query.data.split("_")[1])
-            purchases = db["users"][uid].get("purchases", [])
+            purchases = DB["users"][uid].get("purchases", [])
             if index < len(purchases):
                 service = purchases[index]
-                for cat in db["categories"].values():
+                for cat in DB["categories"].values():
                     for p in cat:
                         if p['volume'] in service:
                             user_data[uid] = {'step': 'wait_name', 'plan': p}
@@ -1138,11 +1172,11 @@ def handle_cb(update, context):
         elif query.data.startswith("del_"):
             if str(uid) == str(ADMIN_ID):
                 pid = int(query.data.split("_")[1])
-                for cat in db["categories"].values():
+                for cat in DB["categories"].values():
                     for i, p in enumerate(cat):
                         if p["id"] == pid:
                             del cat[i]
-                            save_db(db)
+                            save_db()
                             query.message.reply_text("✅ پلن حذف شد")
                             return
                 query.message.reply_text("❌ یافت نشد")
@@ -1157,23 +1191,23 @@ def handle_cb(update, context):
                     query.message.edit_reply_markup(reply_markup=None)
                     context.bot.send_message(ADMIN_ID, f"🔄 در حال ساخت اکانت...")
                     
-                    config, error = create_account_on_panel(plan_data['plan'], plan_data['account'], db)
+                    config, error = create_account_on_panel(plan_data['plan'], plan_data['account'])
                     
                     if config:
                         service_record = f"✅ {plan_data['plan']['name']} | {plan_data['plan']['volume']} | {datetime.now().strftime('%Y-%m-%d')}"
-                        if str(target_uid) not in db["users"]:
-                            db["users"][str(target_uid)] = {"purchases": [], "tests": [], "test_count": 0}
-                        db["users"][str(target_uid)]["purchases"].append(service_record)
-                        save_db(db)
+                        if str(target_uid) not in DB["users"]:
+                            DB["users"][str(target_uid)] = {"purchases": [], "tests": [], "test_count": 0}
+                        DB["users"][str(target_uid)]["purchases"].append(service_record)
+                        save_db()
                         
-                        msg = f"✅ پرداخت شما تأیید شد!\n━━━━━━━━━━━━━━━━━\n👤 {plan_data['account']}\n📦 {plan_data['plan']['name']}\n━━━━━━━━━━━━━━━━━\n🔗 لینک اتصال:\n`{config}`\n\n📚 {db['guide']}"
+                        msg = f"✅ پرداخت شما تأیید شد!\n━━━━━━━━━━━━━━━━━\n👤 {plan_data['account']}\n📦 {plan_data['plan']['name']}\n━━━━━━━━━━━━━━━━━\n🔗 لینک اتصال:\n`{config}`\n\n📚 {DB['guide']}"
                         try:
                             context.bot.send_message(int(target_uid), msg, parse_mode='Markdown')
                             context.bot.send_message(ADMIN_ID, f"✅ کانفیگ برای {target_uid} ارسال شد")
-                        except:
-                            context.bot.send_message(ADMIN_ID, f"❌ خطا در ارسال")
+                        except Exception as e:
+                            context.bot.send_message(ADMIN_ID, f"❌ خطا در ارسال: {e}")
                     else:
-                        context.bot.send_message(ADMIN_ID, f"❌ خطا: {error}")
+                        context.bot.send_message(ADMIN_ID, f"❌ خطا در ساخت اکانت: {error}")
                 except Exception as e:
                     context.bot.send_message(ADMIN_ID, f"❌ خطا در پردازش: {e}")
 
@@ -1186,13 +1220,15 @@ def handle_cb(update, context):
 
     except Exception as e:
         logger.error(f"Callback error: {e}")
+        if 'query' in locals():
+            query.message.reply_text("❌ خطا")
 
 def handle_photo(update, context):
-    global db
+    global DB, user_data
     try:
         uid = str(update.effective_user.id)
         
-        if uid in db.get("blocked_users", []):
+        if uid in DB.get("blocked_users", []):
             update.message.reply_text("🚫 شما توسط ادمین بلاک شده‌اید")
             return
         
@@ -1206,7 +1242,11 @@ def handle_photo(update, context):
             price_toman = p['price'] * 1000
             user_info = get_user_info(uid, context)
             
-            cap = f"💰 فیش جدید\n━━━━━━━━━━━━━━━━━\n👤 {user_info}\n🆔 {uid}\n📦 {p['name']}\n👤 اکانت: {acc}\n💰 {price_toman:,} تومان"
+            discount_text = ""
+            if 'discount_code' in user_data[uid]:
+                discount_text = f"\n🎫 کد تخفیف: {user_data[uid]['discount_code']}"
+            
+            cap = f"💰 فیش جدید\n━━━━━━━━━━━━━━━━━\n👤 {user_info}\n🆔 {uid}\n📦 {p['name']}\n👤 اکانت: {acc}\n💰 {price_toman:,} تومان{discount_text}"
             
             plan_data = {'uid': uid, 'plan': p, 'account': acc}
             encoded = base64.b64encode(json.dumps(plan_data).encode()).decode()
@@ -1225,13 +1265,21 @@ def handle_photo(update, context):
 def main():
     try:
         logger.info("🚀 Starting bot...")
-        reset_webhook_and_clean()
         
+        # بارگذاری دیتابیس
+        load_db()
+        
+        # ریست وب‌هوک
+        reset_webhook()
+        
+        # ایجاد پوشه بکاپ
         if not os.path.exists(BACKUP_DIR):
             os.makedirs(BACKUP_DIR)
         
+        # اجرای وب سرور
         Thread(target=run_web, daemon=True).start()
         
+        # راه‌اندازی ربات
         updater = Updater(TOKEN, use_context=True)
         dp = updater.dispatcher
         
